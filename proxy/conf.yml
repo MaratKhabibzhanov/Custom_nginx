@@ -1,0 +1,28 @@
+listen:
+    host: "127.0.0.1"
+    port: 8000
+upstreams:
+  - host: "127.0.0.1"
+    port: 9001
+  - host: "127.0.0.1"
+    port: 9002
+#  - host: "127.0.0.1"
+#    port: 9003
+#  - host: "127.0.0.1"
+#    port: 9004
+#  - host: "127.0.0.1"
+#    port: 9005
+#  - host: "127.0.0.1"
+#    port: 9006
+timeouts:
+  connect_ms: 1000
+  read_ms: 15000
+  write_ms: 15000
+  total_ms: 30000
+limits:
+  max_client_conns: 1000
+  max_conns_per_upstream: 300
+logging:
+  level: "info"
+chunk_size:
+  1024

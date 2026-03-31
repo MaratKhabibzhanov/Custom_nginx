@@ -53,4 +53,3 @@ class QueryParser:
         result = self._aggregate_head(start_line_dict, headers_dict)
         log_message = self._direction + " " + result.replace('\r\n', ' ')
         return result.encode('utf-8'), body.encode('utf-8'), log_message
-

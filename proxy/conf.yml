@@ -21,7 +21,7 @@ timeouts:
   total_ms: 30000
 limits:
   max_client_conns: 1000
-  max_conns_per_upstream: 300
+  max_conns_per_upstream: 100
 logging:
   level: "info"
 chunk_size:

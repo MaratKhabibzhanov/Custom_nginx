@@ -60,18 +60,6 @@ class ProxyServer:
             break
         await self._stream_body(reader, writer, body)
 
-
-    async def _connect_to_upstream(self) -> Optional[Tuple[StreamReader, StreamWriter]]:
-        upstream = await self._upstream_pool.get_upstream()
-        async with upstream.semaphore:
-            try:
-                return await asyncio.wait_for(
-                    asyncio.open_connection(upstream.host, upstream.port),
-                    config.CONNECT_TIMEOUT
-                )
-            except asyncio.TimeoutError:
-                warn_logger.warning(f'Timeout connecting to {upstream.host}:{upstream.port}')
-
     async def _run_stream(self,
                           client_reader: StreamReader, client_writer: StreamWriter,
                           up_reader: StreamReader, up_writer: StreamWriter) -> None:
@@ -84,7 +72,13 @@ class ProxyServer:
         async with self._client_semaphore:
             address = client_writer.get_extra_info('peername')
             logger.info(f'Start serving {address}')
-            up_reader, up_writer = await self._connect_to_upstream()
+            connection = await self._upstream_pool.get_connection()
+            if not connection:
+                client_writer.write(self._get_timeout_answer())
+                await client_writer.drain()
+                client_writer.close()
+                return
+            up_reader, up_writer = connection
             try:
                 await asyncio.wait_for(self._run_stream(client_reader, client_writer,
                                                         up_reader, up_writer), config.TOTAL_TIMEOUT)
@@ -93,8 +87,9 @@ class ProxyServer:
                 client_writer.write(self._get_timeout_answer())
                 await client_writer.drain()
             finally:
-                up_writer.close()
+                await self._upstream_pool.release_connection(connection)
                 client_writer.close()
+                logger.info(f'Queue size {self._upstream_pool._upstream_queue.qsize()}')
                 logger.info(f'Stop serving {address}')
                 logger.info(f'Round-robin: {self._upstream_pool.load_info}')
 

@@ -30,12 +30,16 @@ class ProxyServer:
     @staticmethod
     async def _stream_body(reader: StreamReader,
                            writer: StreamWriter,
-                           data: bytes) -> None:
+                           data: bytes,
+                           content_length: int) -> None:
         while True:
             if data:
                 writer.write(data)
                 if not await timeout_writer(writer):
                     break
+            content_length -= len(data)
+            if not content_length:
+                break
             data = await timeout_reader(reader)
             if not data:
                 break
@@ -52,13 +56,14 @@ class ProxyServer:
             _buffer += chunk
             if b'\r\n\r\n' not in _buffer:
                 continue
-            head, body, log_message = self._parser.parse_query(_buffer.decode('utf-8'))
+            head, body, content_length, log_message = self._parser.parse_query(_buffer.decode('utf-8'))
             logger.info(log_message)
 
             writer.write(head)
             await timeout_writer(writer)
             break
-        await self._stream_body(reader, writer, body)
+        if content_length:
+            await self._stream_body(reader, writer, body, content_length)
 
     async def _run_stream(self,
                           client_reader: StreamReader, client_writer: StreamWriter,
@@ -67,31 +72,41 @@ class ProxyServer:
             tg.create_task(self._handler(client_reader, up_writer))
             tg.create_task(self._handler(up_reader, client_writer))
 
+    async def _process_connection(self,
+                                  up_connection: Tuple[StreamReader, StreamWriter],
+                                  client_connection: Tuple[StreamReader, StreamWriter],
+                                  address: str) -> None:
+        up_reader, up_writer = up_connection
+        client_reader, client_writer = client_connection
+        try:
+            await asyncio.wait_for(self._run_stream(client_reader, client_writer,
+                                                    up_reader, up_writer), config.TOTAL_TIMEOUT)
+        except asyncio.TimeoutError:
+            warn_logger.warning(f'Timeout processing to {address}')
+            client_writer.write(self._get_timeout_answer())
+            await client_writer.drain()
+        finally:
+            await self._upstream_pool.release_connection(up_connection)
+            client_writer.close()
+            logger.info(f'Queue size {self._upstream_pool._upstream_queue.qsize()}')
+            logger.info(f'Stop serving {address}')
+            logger.info(f'Round-robin: {self._upstream_pool.load_info}')
 
-    async def _client_connected(self, client_reader: StreamReader, client_writer: StreamWriter):
+
+    async def _client_connected(self, client_reader: StreamReader, client_writer: StreamWriter) -> None:
         async with self._client_semaphore:
             address = client_writer.get_extra_info('peername')
             logger.info(f'Start serving {address}')
+
             connection = await self._upstream_pool.get_connection()
-            if not connection:
-                client_writer.write(self._get_timeout_answer())
-                await client_writer.drain()
-                client_writer.close()
-                return
-            up_reader, up_writer = connection
-            try:
-                await asyncio.wait_for(self._run_stream(client_reader, client_writer,
-                                                        up_reader, up_writer), config.TOTAL_TIMEOUT)
-            except asyncio.TimeoutError:
-                warn_logger.warning(f'Timeout processing to {address}')
-                client_writer.write(self._get_timeout_answer())
-                await client_writer.drain()
-            finally:
-                await self._upstream_pool.release_connection(connection)
-                client_writer.close()
-                logger.info(f'Queue size {self._upstream_pool._upstream_queue.qsize()}')
-                logger.info(f'Stop serving {address}')
-                logger.info(f'Round-robin: {self._upstream_pool.load_info}')
+            if connection:
+                return await self._process_connection(connection, (client_reader, client_writer), address)
+
+            upstream = self._upstream_pool.get_upstream()
+            async with upstream.semaphore:
+                connection = await self._upstream_pool.connect_to_upstream(upstream)
+                return await self._process_connection(connection, (client_reader, client_writer), address)
+
 
     async def run_proxy_server(self):
         logger.info('Start proxy server')

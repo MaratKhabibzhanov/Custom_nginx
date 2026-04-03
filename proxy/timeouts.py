@@ -14,7 +14,7 @@ async def timeout_reader(reader: StreamReader) -> Optional[bytes]:
     except asyncio.TimeoutError:
         warn_logger.warning(f'Read timeout error address - {address}')
     except ConnectionResetError:
-        warn_logger.warning(f'Connection reset error address - {address}')
+        warn_logger.warning(f'Read connection reset error address - {address}')
 
 
 async def timeout_writer(writer: StreamWriter) -> bool:
@@ -26,5 +26,5 @@ async def timeout_writer(writer: StreamWriter) -> bool:
         warn_logger.warning(f'Write timeout error address - {address}')
         return False
     except ConnectionResetError:
-        warn_logger.warning(f'Connection reset error address - {address}')
+        warn_logger.warning(f'Write connection reset error address - {address}')
         return False

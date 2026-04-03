@@ -18,32 +18,41 @@ class UpstreamPool:
         self._upstream_queue: asyncio.Queue = asyncio.Queue()
 
 
-    async def _get_upstream(self) -> Upstream:
+    def get_upstream(self) -> Upstream:
         self._idx += 1
         _upstream = self._upstream_info[self._idx % self._length]
-        to_info = str(_upstream)
-        self.load_info[to_info] = self.load_info.setdefault(to_info, 0) + 1
         return _upstream
 
-    async def _connect_to_upstream(self) -> Optional[Tuple[StreamReader, StreamWriter]]:
-        upstream = await self._get_upstream()
-        async with upstream.semaphore:
-            try:
-                return await asyncio.wait_for(
-                    asyncio.open_connection(upstream.host, upstream.port),
-                    config.CONNECT_TIMEOUT
-                )
-            except asyncio.TimeoutError:
-                warn_logger.warning(f'Timeout connecting to {upstream.host}:{upstream.port}')
+
+    async def connect_to_upstream(self, upstream: Upstream) -> Optional[Tuple[StreamReader, StreamWriter]]:
+        try:
+            reader, writer =  await asyncio.wait_for(
+                asyncio.open_connection(upstream.host, upstream.port),
+                config.CONNECT_TIMEOUT
+            )
+            to_info = str(upstream)
+            self.load_info[to_info] = self.load_info.setdefault(to_info, 0) + 1
+            return reader, writer
+        except asyncio.TimeoutError:
+            warn_logger.warning(f'Timeout connecting to {upstream.host}:{upstream.port}')
+
+    @staticmethod
+    async def _is_alive(reader):
+        try:
+            await asyncio.wait_for(reader.read(1), timeout=0.01)
+            return False
+        except asyncio.TimeoutError:
+            return True
+        except (ConnectionResetError, BrokenPipeError):
+            return False
 
     async def get_connection(self) -> Optional[Tuple[StreamReader, StreamWriter]]:
         try:
             reader, writer =  self._upstream_queue.get_nowait()
-            if not writer.transport.is_closing():
+            if await self._is_alive(reader):
                 return reader, writer
         except asyncio.QueueEmpty:
-            pass
-        return await self._connect_to_upstream()
+            return None
 
     async def release_connection(self, connection: Tuple[StreamReader, StreamWriter]) -> None:
         self._upstream_queue.put_nowait(connection)

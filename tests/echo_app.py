@@ -1,4 +1,3 @@
-import asyncio
 import multiprocessing
 
 import uvicorn
@@ -20,7 +19,7 @@ async def echo(request: Request):
     return body.decode("utf-8")
 
 def run_app(host: str, port: int):
-    uvicorn.run(app, host=host, port=port, timeout_keep_alive=60)
+    uvicorn.run(app, host=host, port=port, timeout_keep_alive=5)
 
 
 if __name__ == "__main__":

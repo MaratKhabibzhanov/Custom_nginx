@@ -49,6 +49,7 @@ class ProxyServer:
                        writer: StreamWriter) -> None:
         _buffer = bytes()
         body = bytes()
+        content_length = 0
         while True:
             chunk = await timeout_reader(reader)
             if not chunk:

@@ -33,9 +33,9 @@ class UpstreamPool:
         return timestamp > time.time()
 
     def _check_alive_connection(self, connection: Connection) -> bool:
-        return (not connection.reader.at_eof()
-                and not connection.writer.is_closing()
-                and self._check_timestamp(connection.timestamp))
+        return (self._check_timestamp(connection.timestamp)
+                and not connection.reader.at_eof()
+                and not connection.writer.is_closing())
 
     async def connect_to_upstream(self, upstream: Upstream) -> Optional[Connection]:
         try:
@@ -60,6 +60,7 @@ class UpstreamPool:
 
     async def release_connection(self, connection: Connection) -> None:
         if self._check_alive_connection(connection):
+            connection.timestamp = self._get_timestamp()
             self._upstream_queue.put_nowait(connection)
         else:
             connection.writer.close()

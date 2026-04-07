@@ -1,4 +1,6 @@
 import asyncio
+from time import time
+from asyncio.streams import StreamReader, StreamWriter
 from dataclasses import dataclass
 
 
@@ -10,3 +12,10 @@ class Upstream:
 
     def __str__(self):
         return f"Upstream({self.host}, {self.port})"
+
+
+@dataclass
+class Connection:
+    reader: StreamReader
+    writer: StreamWriter
+    timestamp: time

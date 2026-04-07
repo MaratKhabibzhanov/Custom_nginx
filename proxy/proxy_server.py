@@ -3,6 +3,7 @@ from asyncio.streams import StreamReader, StreamWriter
 from typing import Tuple, Optional
 
 from proxy.config import config
+from proxy.data_classes import Connection
 from proxy.logger import logger, warn_logger
 from proxy.parser import QueryParser
 from proxy.timeouts import timeout_writer, timeout_reader
@@ -51,13 +52,16 @@ class ProxyServer:
         body = bytes()
         content_length = 0
         while True:
+            len_buffer = len(_buffer)
+            if len_buffer > 8192:
+                warn_logger.warning(f'request header fields too large: {len_buffer}')
             chunk = await timeout_reader(reader)
             if not chunk:
                 break
             _buffer += chunk
             if b'\r\n\r\n' not in _buffer:
                 continue
-            head, body, content_length, log_message = self._parser.parse_query(_buffer.decode('utf-8'))
+            head, body, content_length, log_message = self._parser.parse_query(_buffer)
             logger.info(log_message)
 
             writer.write(head)
@@ -74,14 +78,13 @@ class ProxyServer:
             tg.create_task(self._handler(up_reader, client_writer))
 
     async def _process_connection(self,
-                                  up_connection: Tuple[StreamReader, StreamWriter],
+                                  up_connection: Connection,
                                   client_connection: Tuple[StreamReader, StreamWriter],
                                   address: str) -> None:
-        up_reader, up_writer = up_connection
         client_reader, client_writer = client_connection
         try:
             await asyncio.wait_for(self._run_stream(client_reader, client_writer,
-                                                    up_reader, up_writer), config.TOTAL_TIMEOUT)
+                                                    up_connection.reader, up_connection.writer), config.TOTAL_TIMEOUT)
         except asyncio.TimeoutError:
             warn_logger.warning(f'Timeout processing to {address}')
             client_writer.write(self._get_timeout_answer())

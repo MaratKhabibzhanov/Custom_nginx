@@ -18,6 +18,7 @@ class ConfigLoader:
         self.READ_TIMEOUT = self._conf_data['timeouts']['read_ms'] / 1000
         self.WRITE_TIMEOUT = self._conf_data['timeouts']['write_ms'] / 1000
         self.TOTAL_TIMEOUT = self._conf_data['timeouts']['total_ms'] / 1000
+        self.TIMEOUT_KEEP_ALIVE = self._conf_data['timeouts']['keep_alive_ms'] / 1000
         # connections_count
         self.MAX_CLIENT_CONNECTIONS = self._conf_data['limits']['max_client_conns']
         self.MAX_CONNECTIONS_PER_UPSTREAM = self._conf_data['limits']['max_conns_per_upstream']

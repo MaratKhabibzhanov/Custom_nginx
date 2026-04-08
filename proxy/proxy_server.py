@@ -1,6 +1,7 @@
 import asyncio
+import uvloop
 from asyncio.streams import StreamReader, StreamWriter
-from typing import Tuple, Optional
+from typing import Tuple
 
 from proxy.config import config
 from proxy.data_classes import Connection
@@ -120,4 +121,5 @@ class ProxyServer:
 
 if __name__ == '__main__':
     proxy_server = ProxyServer(config.PROXY_SERVER_HOST, config.PROXY_SERVER_PORT)
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
     asyncio.run(proxy_server.run_proxy_server())

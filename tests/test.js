@@ -25,7 +25,7 @@ import http from 'k6/http';
 // }
 
 export  let options = {
-  vus: 1000,
+  vus: 1200,
   duration: '30s',
 };
 

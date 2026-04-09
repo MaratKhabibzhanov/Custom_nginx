@@ -40,7 +40,7 @@ class ProxyServer:
                 if not await timeout_writer(writer):
                     break
             content_length -= len(data)
-            if not content_length:
+            if content_length < 1:
                 break
             data = await timeout_reader(reader)
             if not data:
@@ -93,6 +93,7 @@ class ProxyServer:
         finally:
             await self._upstream_pool.release_connection(up_connection)
             client_writer.close()
+            await client_writer.wait_closed()
             logger.info(f'Queue size {self._upstream_pool._upstream_queue.qsize()}')
             logger.info(f'Stop serving {address}')
             logger.info(f'Round-robin: {self._upstream_pool.load_info}')
@@ -110,6 +111,12 @@ class ProxyServer:
             upstream = self._upstream_pool.get_upstream()
             async with upstream.semaphore:
                 connection = await self._upstream_pool.connect_to_upstream(upstream)
+                if connection is None:
+                    client_writer.write(self._get_timeout_answer())
+                    await client_writer.drain()
+                    client_writer.close()
+                    await client_writer.wait_closed()
+                    return
                 return await self._process_connection(connection, (client_reader, client_writer), address)
 
 
@@ -120,6 +127,6 @@ class ProxyServer:
             await srv.serve_forever()
 
 if __name__ == '__main__':
-    proxy_server = ProxyServer(config.PROXY_SERVER_HOST, config.PROXY_SERVER_PORT)
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    proxy_server = ProxyServer(config.PROXY_SERVER_HOST, config.PROXY_SERVER_PORT)
     asyncio.run(proxy_server.run_proxy_server())

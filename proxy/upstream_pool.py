@@ -1,8 +1,7 @@
 import asyncio
 import time
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Optional
 
-from asyncio.streams import StreamReader, StreamWriter
 from proxy.config import config
 from proxy.data_classes import Upstream, Connection
 from proxy.logger import warn_logger
@@ -56,6 +55,7 @@ class UpstreamPool:
             if self._check_alive_connection(connection):
                 return connection
             connection.writer.close()
+            await connection.writer.wait_closed()
         return None
 
     async def release_connection(self, connection: Connection) -> None:
@@ -64,3 +64,4 @@ class UpstreamPool:
             self._upstream_queue.put_nowait(connection)
         else:
             connection.writer.close()
+            await connection.writer.wait_closed()

@@ -1,6 +1,3 @@
-import multiprocessing
-import time
-
 import uvicorn
 from fastapi import FastAPI, Request
 
@@ -20,9 +17,4 @@ async def echo(request: Request):
     return body.decode("utf-8")
 
 def run_app(host: str, port: int):
-    uvicorn.run(app, host=host, port=port, timeout_keep_alive=config.TIMEOUT_KEEP_ALIVE)
-
-
-if __name__ == "__main__":
-    for ups in config.UPSTREAMS:
-        multiprocessing.Process(target=run_app, args=(ups.host, ups.port)).start()
+    uvicorn.run(app, host=host, port=port, timeout_keep_alive=config.TIMEOUT_KEEP_ALIVE, log_level=config.LOG_LEVEL)

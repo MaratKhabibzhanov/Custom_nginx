@@ -11,7 +11,7 @@ from proxy.utils import singleton
 @singleton
 class ConfigLoader:
     def __init__(self):
-        self._conf_filename = '../proxy/conf.yml'
+        self._conf_filename = 'proxy/conf.yml'
         self._conf_data = self._load_config()
         # timeouts
         self.CONNECT_TIMEOUT = self._conf_data['timeouts']['connect_ms'] / 1000
@@ -27,6 +27,7 @@ class ConfigLoader:
         self.PROXY_SERVER_PORT = self._conf_data['listen']['port']
         self.UPSTREAMS = self._get_upstreams()
         self.CHUNK_SIZE = self._conf_data['chunk_size']
+        self.WORKERS = self._conf_data['workers']
         self.LOG_LEVEL = self._conf_data['logging']['level']
 
 

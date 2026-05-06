@@ -1,7 +1,8 @@
 import asyncio
 import multiprocessing
 import queue
-import select
+import selectors
+from selectors import SelectorKey
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -33,82 +34,121 @@ class ProxyServer:
         self._stream_queue = queue.Queue()
         self._main_queue = queue.Queue()
         # self._lock = threading.Lock()
-        self._sockets = []
+        self._selector = selectors.DefaultSelector()
 
     def _create_server(self) -> socket.socket:
         server_socket = socket.socket()
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         server_socket.bind((self._server_host, self._server_port))
         server_socket.listen()
-        # server_socket.setblocking(False)
+        server_socket.setblocking(False)
         logger.info(f"Start serving on {self._server_host}:{self._server_port}")
         return server_socket
 
-    @staticmethod
-    def _accept_conn(server_sock: socket.socket, sockets: List[socket.socket]) -> None:
+    def _accept_conn(self, server_socket: socket.socket) -> None:
         try:
-            conn, addr = server_sock.accept()
+            connection, address = server_socket.accept()
+            connection.setblocking(False)
             p_name = multiprocessing.current_process().name
-            logger.info(f"Connection from {addr} in process {p_name}")
-            sockets.append(conn)
+            logger.info(f"Connection from {address} in process {p_name}")
+            self._selector.register(connection, selectors.EVENT_READ)
         except socket.error as error:
             logger.info(f"Error accepting connection: {error}")
 
     def _client_reader(self) -> None:
         try:
             while True:
-                print("start client read")
                 client_sock = self._main_queue.get()
+                if client_sock.fileno() == -1:
+                    continue
                 upstream_sock = socket.socket()
                 address = ("127.0.0.1", 9001)
-                print(address)
                 upstream_sock.connect(address)
-                print("connected")
+                upstream_sock.setblocking(False)
+
                 self._stream_queue.put_nowait((client_sock, upstream_sock))
-                self._stream_data(client_sock, upstream_sock)
+                self._handler(client_sock, upstream_sock)
         except socket.error as error:
             logger.warning(f"Error receiving data: {error}")
             client_sock.close()
 
-    def _stream_data(self,
-                     read_sock: socket.socket,
-                     write_sock: socket.socket,) -> None:
+    @staticmethod
+    def _stream_body(read_sock: socket.socket,
+                     write_sock: socket.socket,
+                     data: bytes,
+                     content_length: int) -> None:
         while True:
-            # with self._lock:
-            data = read_sock.recv(1024)
-            print(f"before {data}")
-            if data == b'':
+            if data:
                 try:
-                    self._sockets.remove(read_sock)
-                except ValueError:
-                    pass
+                    write_sock.send(data)
+                except BlockingIOError:
+                    break
+            content_length -= len(data)
+            if content_length < 1:
                 break
-            print(f"after {data}")
-            write_sock.send(data)
+            try:
+                data = read_sock.recv(1024)
+                if not data:
+                    break
+            except BlockingIOError:
+                break
+
+    def _handler(self,
+                 read_sock: socket.socket,
+                 write_sock: socket.socket,) -> None:
+        _buffer = bytes()
+        body = bytes()
+        content_length = 0
+        while True:
+            len_buffer = len(_buffer)
+            if len_buffer > 8192:
+                warn_logger.warning(f'request header fields too large: {len_buffer}')
+            try:
+                chunk = read_sock.recv(1024)
+            except BlockingIOError:
+                continue
+            if not chunk:
+                break
+            _buffer += chunk
+            if b'\r\n\r\n' not in _buffer:
+                continue
+            head, body, content_length, log_message = self._parser.parse_query(_buffer)
+            logger.info(log_message)
+            try:
+                write_sock.send(head)
+            except BlockingIOError:
+                pass
+            break
+        if content_length:
+            self._stream_body(read_sock, write_sock, body, content_length)
 
 
     def _event_loop(self, server_socket: socket.socket) -> None:
-        print("run event loop")
-        self._sockets = [server_socket]
-        print(self._sockets)
+        logger.info("run event loop")
+        self._selector.register(server_socket, selectors.EVENT_READ)
 
-        while self._sockets:
-            print("before select")
-            sockets_for_read, _, _ = select.select(self._sockets, [], [])
-            print("after select",sockets_for_read)
-            for sock in sockets_for_read:
-                if sock is server_socket:
-                    print("waiting for connection")
-                    self._accept_conn(sock, self._sockets)
-                else:
-                    self._main_queue.put_nowait(sock)
+        while True:
+            try:
+                events: List[Tuple[SelectorKey, int]] = self._selector.select(timeout=1)
+            except Exception as e:
+                warn_logger.warning(f"error on sockets {e}")
+                continue
+            if len(events) == 0:
+                continue
+            for event, _ in events:
+                event_socket = event.fileobj
+                if event_socket is server_socket:
+                    self._accept_conn(event_socket)
+                elif event_socket not in self._main_queue.queue and event_socket.fileno() != -1:
+                    self._main_queue.put_nowait(event_socket)
+                    self._selector.unregister(event_socket)
 
     def _upstream_reader(self):
         while True:
-            print("run upstream reader")
             client_sock, upstream_sock = self._stream_queue.get()
-            print("upstream geted data")
-            self._stream_data(upstream_sock, client_sock)
+            if client_sock.fileno() == -1:
+                continue
+            self._handler(upstream_sock, client_sock)
             upstream_sock.close()
             client_sock.close()
 
@@ -122,8 +162,6 @@ class ProxyServer:
         pool.map(self._task, [(self._client_reader,), (self._upstream_reader,)])
         server_socket = self._create_server()
         self._event_loop(server_socket)
-
-
 
 def start_proxy():
     proxy_server = ProxyServer(config.PROXY_SERVER_HOST, config.PROXY_SERVER_PORT)

@@ -24,8 +24,8 @@ limits:
   max_client_conns: 1200
   max_conns_per_upstream: 300
 logging:
-  level: "info"
-#  level: "warning"
+#  level: "info"
+  level: "warning"
 chunk_size:
   1024
 workers:

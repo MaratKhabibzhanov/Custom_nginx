@@ -1,0 +1,4 @@
+#k6 run
+k6 run /home/oneascren/learning/shortcut/custom_nginx/tests/test.js
+
+curl

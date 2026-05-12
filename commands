@@ -1,4 +1,26 @@
+# activate venv
+source .venv/bin/activate
+
+# Echo server start
+uvicorn tests.echo_app:app --reload --host 127.0.0.1 --port 9001 --workers 1
+
+python tests/echo_app.py -p 9002
+
+# test curl request
+curl -v -X POST http://127.0.0.1:8000/echo -d 'hello world'
+
 #k6 run
 k6 run /home/oneascren/learning/shortcut/custom_nginx/tests/test.js
 
-curl
+telnet localhost 8000
+
+# manage ports
+ss -ltnp | grep 8000
+fuser -k 8000/tcp
+
+#start k6 test
+sudo docker run --network="host" -i --rm grafana/k6 run - <test.js
+
+k6 run - <test.js
+
+b'POST /echo HTTP/1.1\r\nHost: 127.0.0.1:8000\r\nUser-Agent: curl/8.14.1\r\nAccept: */*\r\nContent-Length: 11\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nhello world'

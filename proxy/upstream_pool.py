@@ -1,7 +1,7 @@
-import asyncio
+import socket
 import time
 from typing import List, Dict, Optional
-
+import queue
 from proxy.config import config
 from proxy.data_classes import Upstream, Connection
 from proxy.logger import warn_logger
@@ -15,7 +15,8 @@ class UpstreamPool:
         self._idx = -1
         self._length = len(self._upstream_info)
         self.load_info: Dict[str, int] = {}
-        self._upstream_queue: asyncio.Queue = asyncio.Queue()
+        queue_size = config.MAX_CONNECTIONS_PER_UPSTREAM * self._length
+        self._upstream_queue: queue.Queue = queue.Queue(maxsize=queue_size)
 
 
     def get_upstream(self) -> Upstream:
@@ -33,35 +34,31 @@ class UpstreamPool:
 
     def _check_alive_connection(self, connection: Connection) -> bool:
         return (self._check_timestamp(connection.timestamp)
-                and not connection.reader.at_eof()
-                and not connection.writer.is_closing())
+                and not connection.upstream_socket.fileno() == -1)
 
-    async def connect_to_upstream(self, upstream: Upstream) -> Optional[Connection]:
-        try:
-            reader, writer =  await asyncio.wait_for(
-                asyncio.open_connection(upstream.host, upstream.port),
-                config.CONNECT_TIMEOUT
-            )
-            to_info = str(upstream)
-            self.load_info[to_info] = self.load_info.setdefault(to_info, 0) + 1
-            return Connection(reader, writer, self._get_timestamp())
-        except asyncio.TimeoutError:
-            warn_logger.warning(f'Timeout connecting to {upstream.host}:{upstream.port}')
+    def connect_to_upstream(self, upstream: Upstream) -> Optional[Connection]:
+        upstream_sock = socket.socket()
+        upstream_sock.connect((upstream.host, upstream.port))
+        upstream_sock.settimeout(config.SOCKET_TIMEOUT)
+        to_info = str(upstream)
+        self.load_info[to_info] = self.load_info.setdefault(to_info, 0) + 1
+        return Connection(upstream_sock, self._get_timestamp())
 
 
-    async def get_connection(self) -> Optional[Connection]:
+    def get_connection(self) -> Optional[Connection]:
         while not self._upstream_queue.empty():
             connection = self._upstream_queue.get_nowait()
             if self._check_alive_connection(connection):
                 return connection
-            connection.writer.close()
-            await connection.writer.wait_closed()
+            connection.upstream_socket.close()
         return None
 
-    async def release_connection(self, connection: Connection) -> None:
+    def release_connection(self, connection: Connection) -> None:
         if self._check_alive_connection(connection):
             connection.timestamp = self._get_timestamp()
-            self._upstream_queue.put_nowait(connection)
+            try:
+                self._upstream_queue.put(connection, config.UPSTREAM_TIMEOUT)
+            except queue.Full:
+                warn_logger.warning("Upstream timeout")
         else:
-            connection.writer.close()
-            await connection.writer.wait_closed()
+            connection.upstream_socket.close()

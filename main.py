@@ -9,6 +9,5 @@ if __name__ == "__main__":
     for ups in config.UPSTREAMS:
         multiprocessing.Process(target=run_app, args=(ups.host, ups.port)).start()
 
-    # for _ in range(config.WORKERS):
-    #     multiprocessing.Process(target=start_proxy).start()
-    start_proxy()
+    for _ in range(config.WORKERS):
+        multiprocessing.Process(target=start_proxy).start()

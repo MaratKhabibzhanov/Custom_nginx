@@ -60,5 +60,6 @@ class UpstreamPool:
                 self._upstream_queue.put(connection, config.UPSTREAM_TIMEOUT)
             except queue.Full:
                 warn_logger.warning("Upstream timeout")
+                connection.upstream_socket.close()
         else:
             connection.upstream_socket.close()
